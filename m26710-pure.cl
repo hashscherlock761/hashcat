@@ -1,0 +1,149 @@
+#define TRUSTWALLET_SIMD_CODE
+
+#ifdef KERNEL_STATIC
+#include M2S(INCLUDE_PATH/inc_vendor.h)
+#include M2S(INCLUDE_PATH/inc_types.h)
+#include M2S(INCLUDE_PATH/inc_platform.cl)
+#include M2S(INCLUDE_PATH/inc_common.cl)
+#include M2S(INCLUDE_PATH/inc_simd.cl)
+#include M2S(INCLUDE_PATH/inc_hash_sha256.cl)
+#include M2S(INCLUDE_PATH/inc_cipher_aes.cl)
+#include M2S(INCLUDE_PATH/inc_ecdsa.cl)
+#endif
+
+#define COMPARE_S M2S(INCLUDE_PATH/inc_comp_single.cl)
+#define COMPARE_M M2S(INCLUDE_PATH/inc_comp_multi.cl)
+
+typedef struct trustwallet_sha256_tmp
+{
+  u32  ipad[8];
+  u32  opad[8];
+
+  u32  dgst[32];
+  u32  out[32];
+
+} trustwallet_sha256_tmp_t;
+
+DECLSPEC void ecdsa_sha256_run_V (PRIVATE_AS u32x *w0, PRIVATE_AS u32x *w1, PRIVATE_AS u32x *w2, PRIVATE_AS u32x *w3, PRIVATE_AS u32x *ipad, PRIVATE_AS u32x *opad, PRIVATE_AS u32x *digest)
+{
+  digest[0] = ipad[0];
+  digest[1] = ipad[1];
+  digest[2] = ipad[2];
+  digest[3] = ipad[3];
+  digest[4] = ipad[4];
+  digest[5] = ipad[5];
+  digest[6] = ipad[6];
+  digest[7] = ipad[7];
+
+  sha256_transform_vector (w0, w1, w2, w3, digest);
+
+  w0[0] = digest[0];
+  w0[1] = digest[1];
+  w0[2] = digest[2];
+  w0[3] = digest[3];
+  w1[0] = digest[4];
+  w1[1] = digest[5];
+  w1[2] = digest[6];
+  w1[3] = digest[7];
+  w2[0] = 0x80000000;
+  w2[1] = 0;
+  w2[2] = 0;
+  w2[3] = 0;
+  w3[0] = 0;
+  w3[1] = 0;
+  w3[2] = 0;
+  w3[3] = (64 + 32) * 8;
+
+  digest[0] = opad[0];
+  digest[1] = opad[1];
+  digest[2] = opad[2];
+  digest[3] = opad[3];
+  digest[4] = opad[4];
+  digest[5] = opad[5];
+  digest[6] = opad[6];
+  digest[7] = opad[7];
+
+  sha256_transform_vector (w0, w1, w2, w3, digest);
+}
+
+KERNEL_FQ void trustwallet_init (KERN_ATTR_TMPS_ESALT (trustwallet_sha256_tmp_t))
+{
+  const u64 gid = get_global_id (0);
+
+  if (gid >= GID_CNT) return;
+
+  sha256_hmac_ctx_t sha256_hmac_ctx;
+  
+  sha256_hmac_init_global_swap (&sha256_hmac_ctx, pws[gid].i, pws[gid].pw_len);
+
+  tmps[gid].ipad[0] = sha256_hmac_ctx.ipad.h[0];
+  tmps[gid].ipad[1] = sha256_hmac_ctx.ipad.h[1];
+  tmps[gid].ipad[2] = sha256_hmac_ctx.ipad.h[2];
+  tmps[gid].ipad[3] = sha256_hmac_ctx.ipad.h[3];
+  tmps[gid].ipad[4] = sha256_hmac_ctx.ipad.h[4];
+  tmps[gid].ipad[5] = sha256_hmac_ctx.ipad.h[5];
+  tmps[gid].ipad[6] = sha256_hmac_ctx.ipad.h[6];
+  tmps[gid].ipad[7] = sha256_hmac_ctx.ipad.h[7];
+
+  tmps[gid].opad[0] = sha256_hmac_ctx.opad.h[0];
+  tmps[gid].opad[1] = sha256_hmac_ctx.opad.h[1];
+  tmps[gid].opad[2] = sha256_hmac_ctx.opad.h[2];
+  tmps[gid].opad[3] = sha256_hmac_ctx.opad.h[3];
+  tmps[gid].opad[4] = sha256_hmac_ctx.opad.h[4];
+  tmps[gid].opad[5] = sha256_hmac_ctx.opad.h[5];
+  tmps[gid].opad[6] = sha256_hmac_ctx.opad.h[6];
+  tmps[gid].opad[7] = sha256_hmac_ctx.opad.h[7];
+
+  sha256_hmac_update_global_swap (&sha256_hmac_ctx, esalt_bufs[DIGESTS_OFFSET_HOST].salt_buf, salt_bufs[SALT_POS_HOST].salt_len);
+
+  for (u32 i = 0, j = 1; i < 8; i += 8, j += 1)
+  {
+    sha256_hmac_ctx_t sha256_hmac_ctx2 = sha256_hmac_ctx;
+
+    u32 w0[4];
+    u32 w1[4];
+    u32 w2[4];
+    u32 w3[4];
+
+    w0[0] = j;
+    w0[1] = 0;
+    w0[2] = 0;
+    w0[3] = 0;
+    w1[0] = 0;
+    w1[1] = 0;
+    w1[2] = 0;
+    w1[3] = 0;
+    w2[0] = 0;
+    w2[1] = 0;
+    w2[2] = 0;
+    w2[3] = 0;
+    w3[0] = 0;
+    w3[1] = 0;
+    w3[2] = 0;
+    w3[3] = 0;
+
+    sha256_hmac_update_64 (&sha256_hmac_ctx2, w0, w1, w2, w3, 4);
+
+    sha256_hmac_final (&sha256_hmac_ctx2);
+
+    tmps[gid].dgst[i + 0] = sha256_hmac_ctx2.opad.h[0];
+    tmps[gid].dgst[i + 1] = sha256_hmac_ctx2.opad.h[1];
+    tmps[gid].dgst[i + 2] = sha256_hmac_ctx2.opad.h[2];
+    tmps[gid].dgst[i + 3] = sha256_hmac_ctx2.opad.h[3];
+    tmps[gid].dgst[i + 4] = sha256_hmac_ctx2.opad.h[4];
+    tmps[gid].dgst[i + 5] = sha256_hmac_ctx2.opad.h[5];
+    tmps[gid].dgst[i + 6] = sha256_hmac_ctx2.opad.h[6];
+    tmps[gid].dgst[i + 7] = sha256_hmac_ctx2.opad.h[7];
+
+    tmps[gid].out[i + 0] = tmps[gid].dgst[i + 0];
+    tmps[gid].out[i + 1] = tmps[gid].dgst[i + 1];
+    tmps[gid].out[i + 2] = tmps[gid].dgst[i + 2];
+    tmps[gid].out[i + 3] = tmps[gid].dgst[i + 3];
+    tmps[gid].out[i + 4] = tmps[gid].dgst[i + 4];
+    tmps[gid].out[i + 5] = tmps[gid].dgst[i + 5];
+    tmps[gid].out[i + 6] = tmps[gid].dgst[i + 6];
+    tmps[gid].out[i + 7] = tmps[gid].dgst[i + 7];
+  }
+}
+
+KERNEL_FQ void trustwallet_loop (KERN_ATTR_TMPS_ES
