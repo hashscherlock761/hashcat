@@ -72,7 +72,7 @@ def metamask_parser(file, shortdata):
           print('$metamask-short$' + j['salt'] + '$' + j['iv'] + '$' + j['data'])
       else:
         if iter_count != 10000:
-          print('$metamask$rounds=' + str(iter_count) + '$' + j['salt'] + '$' + j['iv'] + '$' + j['data'])
+          print('$metamask$' + str(iter_count) + '$' + j['salt'] + '$' + j['iv'] + '$' + j['data'])
         else:
           print('$metamask$' + j['salt'] + '$' + j['iv'] + '$' + j['data'])
 
